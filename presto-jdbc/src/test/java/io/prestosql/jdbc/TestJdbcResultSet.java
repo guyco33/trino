@@ -35,6 +35,8 @@ import java.sql.Types;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 
 import static io.prestosql.jdbc.TestPrestoDriver.closeQuietly;
 import static java.lang.String.format;
@@ -183,26 +185,25 @@ public class TestJdbcResultSet
 //            ...
 //        });
 
-        checkRepresentation("TIMESTAMP '2018-02-13 13:14:15.227 Europe/Warsaw'", Types.TIMESTAMP /* TODO TIMESTAMP_WITH_TIMEZONE */, (rs, column) -> {
-            assertEquals(rs.getObject(column), Timestamp.valueOf(LocalDateTime.of(2018, 2, 13, 6, 14, 15, 227_000_000))); // TODO this should represent TIMESTAMP '2018-02-13 13:14:15.227 Europe/Warsaw'
+        checkRepresentation("TIMESTAMP '2018-02-13 13:14:15.227 Europe/Warsaw'", Types.TIMESTAMP_WITH_TIMEZONE, (rs, column) -> {
+            assertEquals(rs.getObject(column), ZonedDateTime.of(2018, 2, 13, 13, 14, 15, 227_000_000, ZoneId.of("Europe/Warsaw")));
             assertThrows(() -> rs.getDate(column));
             assertThrows(() -> rs.getTime(column));
-            assertEquals(rs.getTimestamp(column), Timestamp.valueOf(LocalDateTime.of(2018, 2, 13, 6, 14, 15, 227_000_000))); // TODO this should fail, or represent TIMESTAMP '2018-02-13 13:14:15.227'
+            assertThrows(() -> rs.getTimestamp(column)); // this could also return java.sql.Timestamp.valueOf(LocalDateTime.of(2018, 2, 13, 13, 14, 15, 227_000_000))
         });
 
-        checkRepresentation("TIMESTAMP '1970-01-01 09:14:15.227 Europe/Warsaw'", Types.TIMESTAMP /* TODO TIMESTAMP_WITH_TIMEZONE */, (rs, column) -> {
-            assertEquals(rs.getObject(column), Timestamp.valueOf(LocalDateTime.of(1970, 1, 1, 1, 14, 15, 227_000_000))); // TODO this should represent TIMESTAMP '1970-01-01 09:14:15.227 Europe/Warsaw'
+        checkRepresentation("TIMESTAMP '1970-01-01 09:14:15.227 Europe/Warsaw'", Types.TIMESTAMP_WITH_TIMEZONE, (rs, column) -> {
+            assertEquals(rs.getObject(column), ZonedDateTime.of(1970, 1, 1, 9, 14, 15, 227_000_000, ZoneId.of("Europe/Warsaw")));
             assertThrows(() -> rs.getDate(column));
             assertThrows(() -> rs.getTime(column));
-            assertEquals(rs.getTimestamp(column), Timestamp.valueOf(LocalDateTime.of(1970, 1, 1, 1, 14, 15, 227_000_000))); // TODO this should fail, or represent TIMESTAMP '1970-01-01 09:14:15.227'
+            assertThrows(() -> rs.getTimestamp(column)); // this could also return java.sql.Timestamp.valueOf(LocalDateTime.of(1970, 1, 1, 9, 14, 15, 227_000_000))
         });
 
-        checkRepresentation("TIMESTAMP '1970-01-01 00:14:15.227 Europe/Warsaw'", Types.TIMESTAMP /* TODO TIMESTAMP_WITH_TIMEZONE */, (rs, column) -> {
-            assertEquals(rs.getObject(column), Timestamp.valueOf(LocalDateTime.of(1969, 12, 31, 15, 14, 15, 227_000_000))); // TODO this should represent TIMESTAMP '1970-01-01 00:14:15.227 Europe/Warsaw'
+        checkRepresentation("TIMESTAMP '1970-01-01 00:14:15.227 Europe/Warsaw'", Types.TIMESTAMP_WITH_TIMEZONE, (rs, column) -> {
+            assertEquals(rs.getObject(column), ZonedDateTime.of(1970, 1, 1, 0, 14, 15, 227_000_000, ZoneId.of("Europe/Warsaw")));
             assertThrows(() -> rs.getDate(column));
             assertThrows(() -> rs.getTime(column));
-            // TODO this should fail, as there no java.sql.Timestamp representation for TIMESTAMP '1970-01-01 00:14:15.227ó' in America/Bahia_Banderas
-            assertEquals(rs.getTimestamp(column), Timestamp.valueOf(LocalDateTime.of(1969, 12, 31, 15, 14, 15, 227_000_000)));
+            assertThrows(() -> rs.getTimestamp(column)); // there is no representation of TIMESTAMP '1970-01-01 00:14:15.227' in JVM zone (America/Bahia_Banderas)
         });
     }
 
