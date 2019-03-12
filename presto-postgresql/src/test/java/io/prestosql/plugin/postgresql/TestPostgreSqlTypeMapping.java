@@ -266,6 +266,28 @@ public class TestPostgreSqlTypeMapping
     }
 
     @Test
+    public void testEnum()
+    {
+        JdbcSqlExecutor jdbcSqlExecutor = new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl());
+        jdbcSqlExecutor.execute("CREATE TYPE enum_t as enum ('a','b','c')");
+        jdbcSqlExecutor.execute("CREATE TABLE tpch.test_enum(id int, col_s varchar, col_e enum_t)");
+        jdbcSqlExecutor.execute("INSERT INTO tpch.test_enum(id,col_s,col_e) values (1,'a','a'::enum_t)");
+        try {
+            assertQuery(
+                    "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_name = 'test_enum'",
+                    "VALUES ('id','integer'),('col_s','varchar'),('col_e','varchar')");
+            String expected = "VALUES (1,'a','a')";
+            assertQuery("SELECT * FROM tpch.test_enum", expected);
+            assertQuery("SELECT * FROM tpch.test_enum WHERE col_s='a'", expected);
+            assertQuery("SELECT * FROM tpch.test_enum WHERE col_e='a'", expected);
+        }
+        finally {
+            jdbcSqlExecutor.execute("DROP TABLE tpch.test_enum");
+            jdbcSqlExecutor.execute("DROP TYPE enum_t");
+        }
+    }
+
+    @Test
     public void testTimestamp()
     {
         // TODO timestamp is not correctly read (see comment in StandardColumnMappings.timestampColumnMapping)

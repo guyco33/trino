@@ -24,9 +24,12 @@ import io.prestosql.plugin.jdbc.BaseJdbcClient;
 import io.prestosql.plugin.jdbc.BaseJdbcConfig;
 import io.prestosql.plugin.jdbc.ColumnMapping;
 import io.prestosql.plugin.jdbc.DriverConnectionFactory;
+import io.prestosql.plugin.jdbc.JdbcColumnHandle;
 import io.prestosql.plugin.jdbc.JdbcIdentity;
 import io.prestosql.plugin.jdbc.JdbcOutputTableHandle;
+import io.prestosql.plugin.jdbc.JdbcSplit;
 import io.prestosql.plugin.jdbc.JdbcTypeHandle;
+import io.prestosql.plugin.jdbc.QueryBuilder;
 import io.prestosql.plugin.jdbc.SliceWriteFunction;
 import io.prestosql.plugin.jdbc.WriteMapping;
 import io.prestosql.spi.PrestoException;
@@ -48,7 +51,9 @@ import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 
 import static com.fasterxml.jackson.core.JsonFactory.Feature.CANONICALIZE_FIELD_NAMES;
 import static com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS;
@@ -110,6 +115,27 @@ public class PostgreSqlClient
                 escapeNamePattern(schemaName, escape).orElse(null),
                 escapeNamePattern(tableName, escape).orElse(null),
                 new String[] {"TABLE", "VIEW", "MATERIALIZED VIEW", "FOREIGN TABLE"});
+    }
+
+    private Function<JdbcColumnHandle, String> bindingPlaceholder()
+    {
+        return (columnHandle) -> "?::" + columnHandle.getJdbcTypeHandle().getJdbcTypeName();
+    }
+
+    @Override
+    public PreparedStatement buildSql(ConnectorSession session, Connection connection, JdbcSplit split, List<JdbcColumnHandle> columnHandles)
+            throws SQLException
+    {
+        return new QueryBuilder(identifierQuote, bindingPlaceholder()).buildSql(
+                this,
+                session,
+                connection,
+                split.getCatalogName(),
+                split.getSchemaName(),
+                split.getTableName(),
+                columnHandles,
+                split.getTupleDomain(),
+                split.getAdditionalPredicate());
     }
 
     @Override

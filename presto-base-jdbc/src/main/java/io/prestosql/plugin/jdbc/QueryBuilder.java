@@ -30,6 +30,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Strings.isNullOrEmpty;
@@ -46,6 +47,7 @@ public class QueryBuilder
     private static final String ALWAYS_FALSE = "1=0";
 
     private final String quote;
+    private final Function<JdbcColumnHandle, String> bindingPlaceholder;
 
     private static class TypeAndValue
     {
@@ -76,9 +78,15 @@ public class QueryBuilder
         }
     }
 
-    public QueryBuilder(String quote)
+    public QueryBuilder(String quote, Function<JdbcColumnHandle, String> bindingPlaceholder)
     {
         this.quote = requireNonNull(quote, "quote is null");
+        this.bindingPlaceholder = requireNonNull(bindingPlaceholder, "quote is null");
+    }
+
+    QueryBuilder(String quote)
+    {
+        this(quote, column -> "?");
     }
 
     public PreparedStatement buildSql(
@@ -241,7 +249,7 @@ public class QueryBuilder
             for (Object value : singleValues) {
                 bindValue(value, column, accumulator);
             }
-            String values = Joiner.on(",").join(nCopies(singleValues.size(), "?"));
+            String values = Joiner.on(",").join(nCopies(singleValues.size(), bindingPlaceholder.apply(column)));
             disjuncts.add(quote(columnName) + " IN (" + values + ")");
         }
 
@@ -257,7 +265,7 @@ public class QueryBuilder
     private String toPredicate(String columnName, String operator, Object value, JdbcColumnHandle column, List<TypeAndValue> accumulator)
     {
         bindValue(value, column, accumulator);
-        return quote(columnName) + " " + operator + " ?";
+        return quote(columnName) + " " + operator + " " + bindingPlaceholder.apply(column);
     }
 
     private String quote(String name)
