@@ -17,7 +17,10 @@ import com.google.common.collect.ImmutableMap;
 import io.airlift.configuration.testing.ConfigAssertions;
 import org.testng.annotations.Test;
 
+import java.sql.Types;
 import java.util.Map;
+
+import static org.testng.Assert.assertEquals;
 
 public class TestBaseJdbcConfig
 {
@@ -29,7 +32,9 @@ public class TestBaseJdbcConfig
                 .setConnectionUser(null)
                 .setConnectionPassword(null)
                 .setUserCredentialName(null)
-                .setPasswordCredentialName(null));
+                .setPasswordCredentialName(null)
+                .setTypesMappedToVarcharInclude(null)
+                .setTypesMappedToVarcharExclude(null));
     }
 
     @Test
@@ -41,6 +46,8 @@ public class TestBaseJdbcConfig
                 .put("connection-password", "password")
                 .put("user-credential-name", "foo")
                 .put("password-credential-name", "bar")
+                .put("types-mapped-to-varchar-include", "OTHER,ARRAY,mytype,struct_type1,atype")
+                .put("types-mapped-to-varchar-exclude", "other_type1,_type1,STRUCT,atype")
                 .build();
 
         BaseJdbcConfig expected = new BaseJdbcConfig()
@@ -48,8 +55,40 @@ public class TestBaseJdbcConfig
                 .setConnectionUser("user")
                 .setConnectionPassword("password")
                 .setUserCredentialName("foo")
-                .setPasswordCredentialName("bar");
+                .setPasswordCredentialName("bar")
+                .setTypesMappedToVarcharInclude("OTHER,ARRAY,mytype,struct_type1,atype")
+                .setTypesMappedToVarcharExclude("other_type1,_type1,STRUCT,atype");
 
         ConfigAssertions.assertFullMapping(properties, expected);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.OTHER, "other_type1", 0, 0)),
+                false);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.OTHER, "other_type2", 0, 0)),
+                true);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.ARRAY, "_type1", 0, 0)),
+                false);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.ARRAY, "_type2", 0, 0)),
+                true);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.OTHER, "mytype", 0, 0)),
+                true);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.BIGINT, "bigint", 20, 0)),
+                false);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.TIMESTAMP, "timestamp", 0, 0)),
+                false);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.STRUCT, "struct_type1", 0, 0)),
+                true);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.STRUCT, "struct_type2", 0, 0)),
+                false);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.OTHER, "atype", 0, 0)),
+                false);
     }
 }
