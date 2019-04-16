@@ -31,7 +31,7 @@ public final class OutputTableHandle
 
     @JsonCreator
     public OutputTableHandle(
-            @JsonProperty("connectorId") CatalogName catalogName,
+            @JsonProperty("catalogName") CatalogName catalogName,
             @JsonProperty("transactionHandle") ConnectorTransactionHandle transactionHandle,
             @JsonProperty("connectorHandle") ConnectorOutputTableHandle connectorHandle)
     {

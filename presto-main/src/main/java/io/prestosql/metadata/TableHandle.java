@@ -36,7 +36,7 @@ public final class TableHandle
 
     @JsonCreator
     public TableHandle(
-            @JsonProperty("connectorId") CatalogName catalogName,
+            @JsonProperty("catalogName") CatalogName catalogName,
             @JsonProperty("connectorHandle") ConnectorTableHandle connectorHandle,
             @JsonProperty("transaction") ConnectorTransactionHandle transaction,
             @JsonProperty("layout") Optional<ConnectorTableLayoutHandle> layout)

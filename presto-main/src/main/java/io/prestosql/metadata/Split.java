@@ -33,7 +33,7 @@ public final class Split
 
     @JsonCreator
     public Split(
-            @JsonProperty("connectorId") CatalogName catalogName,
+            @JsonProperty("catalogName") CatalogName catalogName,
             @JsonProperty("connectorSplit") ConnectorSplit connectorSplit,
             @JsonProperty("lifespan") Lifespan lifespan)
     {

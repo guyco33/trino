@@ -291,6 +291,24 @@ public class TestPostgreSqlTypeMapping
         }
     }
 
+    @Test
+    public void testTimezoneTZ()
+    {
+        JdbcSqlExecutor jdbcSqlExecutor = new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl());
+        jdbcSqlExecutor.execute("CREATE TABLE tpch.test_tz(id int, c_tz timestamptz)");
+        jdbcSqlExecutor.execute("INSERT INTO tpch.test_tz(id,c_tz) values (1,'2019-04-09'::timestamptz),(2,'2019-04-10 12:40'::timestamptz)");
+        try {
+            assertQuery(
+                    "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_name = 'test_tz'",
+                    "VALUES ('id','integer'),('c_tz','timestamp')");
+            assertQuery("SELECT * FROM tpch.test_tz", "VALUES (1,'2019-04-09'),(2,'2019-04-10 12:40')");
+            assertQuery("SELECT * FROM tpch.test_tz WHERE id=1", "VALUES (1,'2019-04-09')");
+        }
+        finally {
+            jdbcSqlExecutor.execute("DROP TABLE tpch.test_tz");
+        }
+    }
+
     @Test(dataProvider = "testTimestampDataProvider")
     public void testTimestamp(boolean legacyTimestamp, boolean insertWithPresto)
     {

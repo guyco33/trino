@@ -155,7 +155,7 @@ public class PostgreSqlClient
             // This can be e.g. an ENUM
             return Optional.of(typedVarcharColumnMapping(typeHandle.getJdbcTypeName()));
         }
-        if (typeHandle.getJdbcType() == Types.TIMESTAMP) {
+        if (typeHandle.getJdbcType() == Types.TIMESTAMP && typeHandle.getJdbcTypeName().equals("timestamp")) {
             return Optional.of(timestampColumnMapping(session));
         }
         // TODO support PostgreSQL's TIMESTAMP WITH TIME ZONE and TIME WITH TIME ZONE explicitly, otherwise predicate pushdown for these types may be incorrect
