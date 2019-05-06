@@ -251,7 +251,7 @@ public class PostgreSqlClient
             case "json":
                 return Optional.of(jsonColumnMapping());
             case "timestamptz":
-                // PostgreSQL's `timestamp with time zone` is reported as Types.TIMESTAMP rather than Types.TIMESTAMP_WITH_TIMEZONE
+                // PostgreSQL's "timestamp with time zone" is reported as Types.TIMESTAMP rather than Types.TIMESTAMP_WITH_TIMEZONE
                 return Optional.of(timestampWithTimeZoneColumnMapping());
         }
         if (typeHandle.getJdbcType() == Types.VARCHAR && !jdbcTypeName.equals("varchar")) {
@@ -283,7 +283,7 @@ public class PostgreSqlClient
                         return arrayColumnMapping(session, prestoArrayType, elementTypeName);
                     });
         }
-        // TODO support PostgreSQL's TIMESTAMP WITH TIME ZONE and TIME WITH TIME ZONE explicitly, otherwise predicate pushdown for these types may be incorrect
+        // TODO support PostgreSQL's TIME WITH TIME ZONE explicitly, otherwise predicate pushdown for these types may be incorrect
         return super.toPrestoType(session, typeHandle);
     }
 
