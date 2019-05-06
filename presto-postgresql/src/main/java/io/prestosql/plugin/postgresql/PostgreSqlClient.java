@@ -80,6 +80,7 @@ import static io.prestosql.plugin.jdbc.StandardColumnMappings.timestampColumnMap
 import static io.prestosql.plugin.jdbc.StandardColumnMappings.timestampWriteFunction;
 import static io.prestosql.plugin.jdbc.StandardColumnMappings.tinyintWriteFunction;
 import static io.prestosql.plugin.jdbc.StandardColumnMappings.varbinaryWriteFunction;
+import static io.prestosql.plugin.jdbc.StandardColumnMappings.varcharColumnMapping;
 import static io.prestosql.plugin.postgresql.TypeUtils.getArrayElementPgTypeName;
 import static io.prestosql.plugin.postgresql.TypeUtils.getJdbcObjectArray;
 import static io.prestosql.plugin.postgresql.TypeUtils.jdbcObjectArrayToBlock;
@@ -93,6 +94,7 @@ import static io.prestosql.spi.type.TimeZoneKey.UTC_KEY;
 import static io.prestosql.spi.type.TimestampType.TIMESTAMP;
 import static io.prestosql.spi.type.TimestampWithTimeZoneType.TIMESTAMP_WITH_TIME_ZONE;
 import static io.prestosql.spi.type.VarbinaryType.VARBINARY;
+import static io.prestosql.spi.type.VarcharType.createUnboundedVarcharType;
 import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.sql.DatabaseMetaData.columnNoNulls;
@@ -246,6 +248,9 @@ public class PostgreSqlClient
         String jdbcTypeName = typeHandle.getJdbcTypeName()
                 .orElseThrow(() -> new PrestoException(JDBC_ERROR, "Type name is missing: " + typeHandle));
 
+        if (this.config.isTypeMappedToVarchar(typeHandle)) {
+            return Optional.of(varcharColumnMapping(createUnboundedVarcharType()));
+        }
         switch (jdbcTypeName) {
             case "jsonb":
             case "json":

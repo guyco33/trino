@@ -116,13 +116,14 @@ public class BaseJdbcClient
 
     protected final ConnectionFactory connectionFactory;
     protected final String identifierQuote;
+    protected final BaseJdbcConfig config;
     protected final boolean caseInsensitiveNameMatching;
     protected final Cache<JdbcIdentity, Map<String, String>> remoteSchemaNames;
     protected final Cache<RemoteTableNameCacheKey, Map<String, String>> remoteTableNames;
 
     public BaseJdbcClient(BaseJdbcConfig config, String identifierQuote, ConnectionFactory connectionFactory)
     {
-        requireNonNull(config, "config is null"); // currently unused, retained as parameter for future extensions
+        this.config = requireNonNull(config, "config is null");
         this.identifierQuote = requireNonNull(identifierQuote, "identifierQuote is null");
         this.connectionFactory = requireNonNull(connectionFactory, "connectionFactory is null");
 
@@ -256,7 +257,7 @@ public class BaseJdbcClient
     @Override
     public Optional<ColumnMapping> toPrestoType(ConnectorSession session, JdbcTypeHandle typeHandle)
     {
-        return jdbcTypeToPrestoType(session, typeHandle);
+        return jdbcTypeToPrestoType(session, typeHandle, this.config);
     }
 
     @Override
