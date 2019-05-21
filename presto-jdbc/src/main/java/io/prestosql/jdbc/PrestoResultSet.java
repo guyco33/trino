@@ -23,7 +23,6 @@ import io.prestosql.client.QueryError;
 import io.prestosql.client.QueryStatusInfo;
 import io.prestosql.client.StatementClient;
 import io.prestosql.jdbc.ColumnInfo.Nullable;
-import io.prestosql.spi.type.SqlTimestampWithTimeZone;
 import org.joda.time.DateTimeZone;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
@@ -86,8 +85,8 @@ public class PrestoResultSet
             .toFormatter()
             .withOffsetParsed();
 
-     static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss.SSS");
-     static final java.time.format.DateTimeFormatter TIMESTAMP_WITH_TIME_ZONE_FORMATTER = java.time.format.DateTimeFormatter.ofPattern(SqlTimestampWithTimeZone.JSON_FORMAT);
+    static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss.SSS");
+    static final java.time.format.DateTimeFormatter TIMESTAMP_WITH_TIME_ZONE_FORMATTER = java.time.format.DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss.SSS VV");
 
     private final StatementClient client;
     private final DateTimeZone sessionTimeZone;
