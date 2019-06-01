@@ -23,7 +23,19 @@ import javax.validation.constraints.NotNull;
 
 import static io.prestosql.plugin.jdbc.credential.CredentialProviderType.INLINE;
 import static java.util.Objects.requireNonNull;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.sql.Types;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
 import static java.util.concurrent.TimeUnit.MINUTES;
+import static java.util.stream.Collectors.toList;
 
 public class BaseJdbcConfig
 {
@@ -33,6 +45,31 @@ public class BaseJdbcConfig
     private boolean caseInsensitiveNameMatching;
     private Duration caseInsensitiveNameMatchingCacheTtl = new Duration(1, MINUTES);
     private CredentialProviderType credentialProviderType = INLINE;
+    private String typesMappedToVarcharInclude;
+    private String typesMappedToVarcharExclude;
+    private Set<Integer> includeTypesMappingToVarchar;
+    private Set<String> includeTypeNamesMappingToVarchar;
+    private Set<Integer> excludeTypesMappingToVarchar;
+    private Set<String> excludeTypeNamesMappingToVarchar;
+
+    private static List<Field> getStatics(Class<?> clazz)
+    {
+        return Arrays.stream(clazz.getDeclaredFields()).filter(f ->
+                Modifier.isStatic(f.getModifiers())).collect(toList());
+    }
+
+    private static final Map<String, Integer> typesMap = new HashMap<String, Integer>()
+    {
+        {
+            for (Field f : getStatics(Types.class)) {
+                try {
+                    put(f.getName(), f.getInt(f));
+                }
+                catch (Exception e) {
+                }
+            }
+        }
+    };
 
     @NotNull
     public String getConnectionUrl()
@@ -45,6 +82,88 @@ public class BaseJdbcConfig
     {
         this.connectionUrl = connectionUrl;
         return this;
+    }
+
+    public String getTypesMappedToVarcharInclude()
+    {
+        return typesMappedToVarcharInclude;
+    }
+
+    @Config("types-mapped-to-varchar-include")
+    public BaseJdbcConfig setTypesMappedToVarcharInclude(String typesMappedToVarcharInclude)
+    {
+        this.typesMappedToVarcharInclude = typesMappedToVarcharInclude;
+        this.includeTypesMappingToVarchar = new HashSet<Integer>();
+        this.includeTypeNamesMappingToVarchar = new HashSet<String>();
+        if (typesMappedToVarcharInclude != null) {
+            for (String type : typesMappedToVarcharInclude.split(",")) {
+                if (typesMap.containsKey(type.toUpperCase())) {
+                    this.includeTypesMappingToVarchar.add(typesMap.get(type.toUpperCase()));
+                }
+                else {
+                    this.includeTypeNamesMappingToVarchar.add(type);
+                }
+            }
+        }
+        return this;
+    }
+
+    public String getTypesMappedToVarcharExclude()
+    {
+        return typesMappedToVarcharExclude;
+    }
+
+    @Config("types-mapped-to-varchar-exclude")
+    public BaseJdbcConfig setTypesMappedToVarcharExclude(String typesMappedToVarcharExclude)
+    {
+        this.typesMappedToVarcharExclude = typesMappedToVarcharExclude;
+        this.excludeTypesMappingToVarchar = new HashSet<Integer>();
+        this.excludeTypeNamesMappingToVarchar = new HashSet<String>();
+        if (typesMappedToVarcharExclude != null) {
+            for (String type : typesMappedToVarcharExclude.split(",")) {
+                if (typesMap.containsKey(type.toUpperCase())) {
+                    this.excludeTypesMappingToVarchar.add(typesMap.get(type.toUpperCase()));
+                }
+                else {
+                    this.excludeTypeNamesMappingToVarchar.add(type);
+                }
+            }
+        }
+        return this;
+    }
+
+    public boolean isIncludedTypeNameMappedToVarchar(Optional<String> typeName)
+    {
+        return typeName.isPresent() && getTypesMappedToVarcharInclude() != null && this.includeTypeNamesMappingToVarchar.contains(typeName.get());
+    }
+
+    public boolean isExcludedTypeNameMappedToVarchar(Optional<String> typeName)
+    {
+        return typeName.isPresent() && getTypesMappedToVarcharExclude() != null && this.excludeTypeNamesMappingToVarchar.contains(typeName.get());
+    }
+
+    public boolean isIncludedTypeMappedToVarchar(int type)
+    {
+        return getTypesMappedToVarcharInclude() != null && this.includeTypesMappingToVarchar.contains(type);
+    }
+
+    public boolean isExcludedTypeMappedToVarchar(int type)
+    {
+        return getTypesMappedToVarcharExclude() != null && this.excludeTypesMappingToVarchar.contains(type);
+    }
+
+    public boolean isTypeMappedToVarchar(JdbcTypeHandle typeHandle)
+    {
+        if (isExcludedTypeNameMappedToVarchar(typeHandle.getJdbcTypeName())) {
+            return false;
+        }
+        if (isIncludedTypeNameMappedToVarchar(typeHandle.getJdbcTypeName())) {
+            return true;
+        }
+        if (isExcludedTypeMappedToVarchar(typeHandle.getJdbcType())) {
+            return false;
+        }
+        return isIncludedTypeMappedToVarchar(typeHandle.getJdbcType());
     }
 
     @Nullable

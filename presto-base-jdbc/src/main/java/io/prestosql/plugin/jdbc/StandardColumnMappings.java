@@ -380,8 +380,11 @@ public final class StandardColumnMappings
         return Instant.ofEpochMilli(value).atZone(UTC).toLocalDateTime();
     }
 
-    public static Optional<ColumnMapping> jdbcTypeToPrestoType(ConnectorSession session, JdbcTypeHandle type)
+    public static Optional<ColumnMapping> jdbcTypeToPrestoType(ConnectorSession session, JdbcTypeHandle type, BaseJdbcConfig config)
     {
+        if (config != null && config.isTypeMappedToVarchar(type)) {
+            return Optional.of(varcharColumnMapping(createUnboundedVarcharType()));
+        }
         int columnSize = type.getColumnSize();
         switch (type.getJdbcType()) {
             case Types.BIT:

@@ -17,7 +17,9 @@ import com.google.common.collect.ImmutableMap;
 import io.airlift.units.Duration;
 import org.testng.annotations.Test;
 
+import java.sql.Types;
 import java.util.Map;
+import java.util.Optional;
 
 import static io.airlift.configuration.testing.ConfigAssertions.assertFullMapping;
 import static io.airlift.configuration.testing.ConfigAssertions.assertRecordedDefaults;
@@ -26,6 +28,7 @@ import static io.prestosql.plugin.jdbc.credential.CredentialProviderType.FILE;
 import static io.prestosql.plugin.jdbc.credential.CredentialProviderType.INLINE;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.testng.Assert.assertEquals;
 
 public class TestBaseJdbcConfig
 {
@@ -38,7 +41,9 @@ public class TestBaseJdbcConfig
                 .setPasswordCredentialName(null)
                 .setCaseInsensitiveNameMatching(false)
                 .setCaseInsensitiveNameMatchingCacheTtl(new Duration(1, MINUTES))
-                .setCredentialProviderType(INLINE));
+                .setCredentialProviderType(INLINE)
+                .setTypesMappedToVarcharInclude(null)
+                .setTypesMappedToVarcharExclude(null));
     }
 
     @Test
@@ -51,6 +56,8 @@ public class TestBaseJdbcConfig
                 .put("case-insensitive-name-matching", "true")
                 .put("case-insensitive-name-matching.cache-ttl", "1s")
                 .put("credential-provider.type", "FILE")
+                .put("types-mapped-to-varchar-include", "OTHER,ARRAY,mytype,struct_type1,atype")
+                .put("types-mapped-to-varchar-exclude", "other_type1,_type1,STRUCT,atype")
                 .build();
 
         BaseJdbcConfig expected = new BaseJdbcConfig()
@@ -59,8 +66,40 @@ public class TestBaseJdbcConfig
                 .setPasswordCredentialName("bar")
                 .setCaseInsensitiveNameMatching(true)
                 .setCaseInsensitiveNameMatchingCacheTtl(new Duration(1, SECONDS))
-                .setCredentialProviderType(FILE);
+                .setCredentialProviderType(FILE)
+                .setTypesMappedToVarcharInclude("OTHER,ARRAY,mytype,struct_type1,atype")
+                .setTypesMappedToVarcharExclude("other_type1,_type1,STRUCT,atype");
 
         assertFullMapping(properties, expected);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.OTHER, Optional.ofNullable("other_type1"), 0, 0, Optional.empty())),
+                false);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.OTHER, Optional.ofNullable("other_type2"), 0, 0, Optional.empty())),
+                true);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.ARRAY, Optional.ofNullable("_type1"), 0, 0, Optional.empty())),
+                false);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.ARRAY, Optional.ofNullable("_type2"), 0, 0, Optional.empty())),
+                true);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.OTHER, Optional.ofNullable("mytype"), 0, 0, Optional.empty())),
+                true);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.BIGINT, Optional.ofNullable("bigint"), 20, 0, Optional.empty())),
+                false);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.TIMESTAMP, Optional.ofNullable("timestamp"), 0, 0, Optional.empty())),
+                false);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.STRUCT, Optional.ofNullable("struct_type1"), 0, 0, Optional.empty())),
+                true);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.STRUCT, Optional.ofNullable("struct_type2"), 0, 0, Optional.empty())),
+                false);
+
+        assertEquals(expected.isTypeMappedToVarchar(new JdbcTypeHandle(Types.OTHER, Optional.ofNullable("atype"), 0, 0, Optional.empty())),
+                false);
     }
 }

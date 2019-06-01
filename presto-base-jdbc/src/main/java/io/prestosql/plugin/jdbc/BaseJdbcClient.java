@@ -115,6 +115,7 @@ public class BaseJdbcClient
 
     protected final ConnectionFactory connectionFactory;
     protected final String identifierQuote;
+    protected BaseJdbcConfig config;
     protected final boolean caseInsensitiveNameMatching;
     protected final Cache<JdbcIdentity, Map<String, String>> remoteSchemaNames;
     protected final Cache<RemoteTableNameCacheKey, Map<String, String>> remoteTableNames;
@@ -126,6 +127,7 @@ public class BaseJdbcClient
                 connectionFactory,
                 requireNonNull(config, "config is null").isCaseInsensitiveNameMatching(),
                 config.getCaseInsensitiveNameMatchingCacheTtl());
+        this.config = requireNonNull(config, "config is null");
     }
 
     public BaseJdbcClient(
@@ -260,7 +262,7 @@ public class BaseJdbcClient
     @Override
     public Optional<ColumnMapping> toPrestoType(ConnectorSession session, Connection connection, JdbcTypeHandle typeHandle)
     {
-        return jdbcTypeToPrestoType(session, typeHandle);
+        return jdbcTypeToPrestoType(session, typeHandle, this.config);
     }
 
     @Override
