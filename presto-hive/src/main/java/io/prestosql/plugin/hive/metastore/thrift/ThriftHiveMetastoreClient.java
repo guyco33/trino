@@ -15,9 +15,12 @@ package io.prestosql.plugin.hive.metastore.thrift;
 
 import com.google.common.collect.ImmutableList;
 import io.airlift.log.Logger;
+import io.prestosql.plugin.hive.s3.PrestoS3FileSystem;
 import io.prestosql.plugin.hive.util.LoggingInvocationHandler;
 import io.prestosql.plugin.hive.util.LoggingInvocationHandler.AirliftParameterNamesProvider;
 import io.prestosql.plugin.hive.util.LoggingInvocationHandler.ParameterNamesProvider;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.metastore.api.ColumnStatistics;
 import org.apache.hadoop.hive.metastore.api.ColumnStatisticsDesc;
 import org.apache.hadoop.hive.metastore.api.ColumnStatisticsObj;
@@ -45,11 +48,15 @@ import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.transport.TTransport;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.reflect.Reflection.newProxy;
+import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
+import static org.apache.hadoop.hive.metastore.TableType.MANAGED_TABLE;
 
 public class ThriftHiveMetastoreClient
         implements ThriftMetastoreClient
@@ -139,7 +146,44 @@ public class ThriftHiveMetastoreClient
     public void dropTable(String databaseName, String name, boolean deleteData)
             throws TException
     {
+        Table table = client.get_table(databaseName, name);
+
         client.drop_table(databaseName, name, deleteData);
+
+        String tableLocation = table.getSd().getLocation();
+        if (deleteData && isManagedTable(table) && !isNullOrEmpty(tableLocation)) {
+            // Workaround for issue https://github.com/prestosql/presto/issues/1053
+            deleteTableFilesIfNeeded(databaseName, name, new Path(tableLocation));
+        }
+    }
+
+    private void deleteTableFilesIfNeeded(String databaseName, String tableName, Path tablePath)
+    {
+        try {
+            if (isS3Table(tablePath)) {
+                PrestoS3FileSystem fs = new PrestoS3FileSystem();
+                fs.initialize(tablePath.toUri(), new Configuration());
+                if (fs.listPrefix(tablePath).hasNext()) {
+                    log.warn(format("Table \"%s\".\"%s\" dropped, but files exist in '%s'", databaseName, tableName, tablePath.toUri()));
+                    if (fs.delete(tablePath, true)) {
+                        log.warn(format("Deleted files for table \"%s\".\"%s\" in '%s' (Workaround for issue #1053)", databaseName, tableName, tablePath.toUri()));
+                    }
+                }
+            }
+        }
+        catch (Exception ex) {
+            log.error(ex.getMessage());
+        }
+    }
+
+    private static boolean isManagedTable(Table table)
+    {
+        return table.getTableType().equals(MANAGED_TABLE.name());
+    }
+
+    private static boolean isS3Table(Path tablePath)
+    {
+        return Arrays.asList("s3", "s3a", "s3n").stream().anyMatch(s -> tablePath.toUri().getScheme().equals(s));
     }
 
     @Override

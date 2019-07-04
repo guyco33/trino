@@ -485,7 +485,7 @@ public class PrestoS3FileSystem
         return true;
     }
 
-    private Iterator<LocatedFileStatus> listPrefix(Path path)
+    public Iterator<LocatedFileStatus> listPrefix(Path path)
     {
         String key = keyFromPath(path);
         if (!key.isEmpty()) {
