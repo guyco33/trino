@@ -699,7 +699,7 @@ public abstract class AbstractTestHive
 
         MetastoreLocator metastoreLocator = new TestingMetastoreLocator(hiveConfig, host, port);
         HiveMetastore metastore = new CachingHiveMetastore(
-                new BridgingHiveMetastore(new ThriftHiveMetastore(metastoreLocator, new ThriftHiveMetastoreConfig())),
+                new BridgingHiveMetastore(new ThriftHiveMetastore(metastoreLocator, new ThriftHiveMetastoreConfig(), hdfsEnvironment)),
                 executor,
                 Duration.valueOf("1m"),
                 Duration.valueOf("15s"),

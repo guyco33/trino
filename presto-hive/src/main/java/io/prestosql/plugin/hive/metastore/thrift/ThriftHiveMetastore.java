@@ -17,7 +17,10 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import io.airlift.log.Logger;
 import io.airlift.units.Duration;
+import io.prestosql.plugin.hive.HdfsEnvironment;
+import io.prestosql.plugin.hive.HdfsEnvironment.HdfsContext;
 import io.prestosql.plugin.hive.HiveBasicStatistics;
 import io.prestosql.plugin.hive.HiveType;
 import io.prestosql.plugin.hive.HiveViewNotSupportedException;
@@ -35,9 +38,12 @@ import io.prestosql.spi.PrestoException;
 import io.prestosql.spi.connector.SchemaNotFoundException;
 import io.prestosql.spi.connector.SchemaTableName;
 import io.prestosql.spi.connector.TableNotFoundException;
+import io.prestosql.spi.security.ConnectorIdentity;
 import io.prestosql.spi.security.RoleGrant;
 import io.prestosql.spi.statistics.ColumnStatisticType;
 import io.prestosql.spi.type.Type;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
 import org.apache.hadoop.hive.metastore.api.ColumnStatisticsObj;
@@ -64,6 +70,7 @@ import org.weakref.jmx.Managed;
 import javax.annotation.concurrent.ThreadSafe;
 import javax.inject.Inject;
 
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -76,6 +83,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
@@ -102,6 +110,7 @@ import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toSet;
 import static org.apache.hadoop.hive.common.FileUtils.makePartName;
+import static org.apache.hadoop.hive.metastore.TableType.MANAGED_TABLE;
 import static org.apache.hadoop.hive.metastore.api.HiveObjectType.TABLE;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.HIVE_FILTER_FIELD_PARAMS;
 
@@ -109,7 +118,12 @@ import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.HIVE_
 public class ThriftHiveMetastore
         implements ThriftMetastore
 {
+    private static final Logger log = Logger.get(ThriftHiveMetastore.class);
+    private static final String DEFAULT_METASTORE_USER = "presto";
+
     private final ThriftMetastoreStats stats = new ThriftMetastoreStats();
+    private final HdfsEnvironment hdfsEnvironment;
+    private final HdfsContext hdfsContext;
     private final MetastoreLocator clientProvider;
     private final double backoffScaleFactor;
     private final Duration minBackoffDelay;
@@ -121,9 +135,11 @@ public class ThriftHiveMetastore
     private volatile boolean metastoreKnownToSupportTableParamLikePredicate;
 
     @Inject
-    public ThriftHiveMetastore(MetastoreLocator metastoreLocator, ThriftHiveMetastoreConfig thriftConfig)
+    public ThriftHiveMetastore(MetastoreLocator metastoreLocator, ThriftHiveMetastoreConfig thriftConfig, HdfsEnvironment hdfsEnvironment)
     {
+        this.hdfsContext = new HdfsContext(new ConnectorIdentity(DEFAULT_METASTORE_USER, Optional.empty(), Optional.empty()));
         this.clientProvider = requireNonNull(metastoreLocator, "metastoreLocator is null");
+        this.hdfsEnvironment = hdfsEnvironment;
         this.backoffScaleFactor = thriftConfig.getBackoffScaleFactor();
         this.minBackoffDelay = thriftConfig.getMinBackoffDelay();
         this.maxBackoffDelay = thriftConfig.getMaxBackoffDelay();
@@ -893,7 +909,13 @@ public class ThriftHiveMetastore
                     .stopOnIllegalExceptions()
                     .run("dropTable", stats.getDropTable().wrap(() -> {
                         try (ThriftMetastoreClient client = clientProvider.createMetastoreClient()) {
+                            Table table = client.getTable(databaseName, tableName);
                             client.dropTable(databaseName, tableName, deleteData);
+                            String tableLocation = table.getSd().getLocation();
+                            if (deleteData && isManagedTable(table) && !isNullOrEmpty(tableLocation)) {
+                                // Workaround for issue https://github.com/prestosql/presto/issues/1053
+                                deleteTableFilesIfNeeded(hdfsContext, hdfsEnvironment, databaseName, tableName, new Path(tableLocation));
+                            }
                         }
                         return null;
                     }));
@@ -907,6 +929,34 @@ public class ThriftHiveMetastore
         catch (Exception e) {
             throw propagate(e);
         }
+    }
+
+    private static void deleteTableFilesIfNeeded(HdfsContext context, HdfsEnvironment hdfsEnvironment, String databaseName, String tableName, Path tablePath)
+    {
+        try {
+            if (isS3Table(tablePath)) {
+                FileSystem fs = hdfsEnvironment.getFileSystem(context, tablePath);
+                if (fs.listFiles(tablePath, true).hasNext()) {
+                    log.warn(format("Table \"%s\".\"%s\" dropped, but files exist in '%s'", databaseName, tableName, tablePath.toUri()));
+                    if (fs.delete(tablePath, true)) {
+                        log.warn(format("Deleted files for table \"%s\".\"%s\" in '%s' (Workaround for issue #1053)", databaseName, tableName, tablePath.toUri()));
+                    }
+                }
+            }
+        }
+        catch (Exception ex) {
+            log.error(ex.getMessage());
+        }
+    }
+
+    private static boolean isManagedTable(Table table)
+    {
+        return table.getTableType().equals(MANAGED_TABLE.name());
+    }
+
+    private static boolean isS3Table(Path tablePath)
+    {
+        return Arrays.asList("s3", "s3a", "s3n").stream().anyMatch(s -> tablePath.toUri().getScheme().equals(s));
     }
 
     @Override
