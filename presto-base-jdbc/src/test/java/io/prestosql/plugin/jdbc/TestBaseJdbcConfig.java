@@ -23,6 +23,8 @@ import java.util.Map;
 import static io.airlift.configuration.testing.ConfigAssertions.assertFullMapping;
 import static io.airlift.configuration.testing.ConfigAssertions.assertRecordedDefaults;
 import static io.airlift.configuration.testing.ConfigAssertions.recordDefaults;
+import static java.math.RoundingMode.HALF_UP;
+import static java.math.RoundingMode.UNNECESSARY;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.testng.Assert.assertEquals;
@@ -36,7 +38,9 @@ public class TestBaseJdbcConfig
                 .setConnectionUrl(null)
                 .setCaseInsensitiveNameMatching(false)
                 .setCaseInsensitiveNameMatchingCacheTtl(new Duration(1, MINUTES))
-                .setJdbcTypesMappedToVarchar(null));
+                .setJdbcTypesMappedToVarchar(null)
+                .setDecimalDefaultScale(16)
+                .setDecimalRoundingMode(UNNECESSARY));
     }
 
     @Test
@@ -47,13 +51,17 @@ public class TestBaseJdbcConfig
                 .put("case-insensitive-name-matching", "true")
                 .put("case-insensitive-name-matching.cache-ttl", "1s")
                 .put("jdbc-types-mapped-to-varchar", "mytype,struct_type1")
+                .put("decimal-default-scale", "3")
+                .put("decimal-rounding-mode", "HALF_UP")
                 .build();
 
         BaseJdbcConfig expected = new BaseJdbcConfig()
                 .setConnectionUrl("jdbc:h2:mem:config")
                 .setCaseInsensitiveNameMatching(true)
                 .setCaseInsensitiveNameMatchingCacheTtl(new Duration(1, SECONDS))
-                .setJdbcTypesMappedToVarchar("mytype, struct_type1");
+                .setJdbcTypesMappedToVarchar("mytype, struct_type1")
+                .setDecimalDefaultScale(3)
+                .setDecimalRoundingMode(HALF_UP);
 
         assertFullMapping(properties, expected);
 

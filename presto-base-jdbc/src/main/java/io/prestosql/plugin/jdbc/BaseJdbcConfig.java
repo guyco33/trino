@@ -19,8 +19,11 @@ import io.airlift.configuration.Config;
 import io.airlift.units.Duration;
 import io.airlift.units.MinDuration;
 
+import javax.validation.constraints.Max;
+import javax.validation.constraints.Min;
 import javax.validation.constraints.NotNull;
 
+import java.math.RoundingMode;
 import java.util.Set;
 
 import static com.google.common.base.Strings.nullToEmpty;
@@ -32,6 +35,8 @@ public class BaseJdbcConfig
     private boolean caseInsensitiveNameMatching;
     private Duration caseInsensitiveNameMatchingCacheTtl = new Duration(1, MINUTES);
     private Set<String> jdbcTypesMappedToVarchar = ImmutableSet.of();
+    private int decimalDefaultScale = 16;
+    private RoundingMode decimalRoundingMode = RoundingMode.UNNECESSARY;
 
     @NotNull
     public String getConnectionUrl()
@@ -81,6 +86,33 @@ public class BaseJdbcConfig
     public BaseJdbcConfig setJdbcTypesMappedToVarchar(String jdbcTypesMappedToVarchar)
     {
         this.jdbcTypesMappedToVarchar = ImmutableSet.copyOf(Splitter.on(",").omitEmptyStrings().trimResults().split(nullToEmpty(jdbcTypesMappedToVarchar)));
+        return this;
+    }
+
+    @Min(0)
+    @Max(38)
+    public Integer getDecimalDefaultScale()
+    {
+        return decimalDefaultScale;
+    }
+
+    @Config("decimal-default-scale")
+    public BaseJdbcConfig setDecimalDefaultScale(Integer decimalDefaultScale)
+    {
+        this.decimalDefaultScale = decimalDefaultScale;
+        return this;
+    }
+
+    @NotNull
+    public RoundingMode getDecimalRoundingMode()
+    {
+        return decimalRoundingMode;
+    }
+
+    @Config("decimal-rounding-mode")
+    public BaseJdbcConfig setDecimalRoundingMode(RoundingMode decimalRoundingMode)
+    {
+        this.decimalRoundingMode = decimalRoundingMode;
         return this;
     }
 }

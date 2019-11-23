@@ -50,7 +50,7 @@ public class JdbcModule
     {
         newOptionalBinder(binder, ConnectorAccessControl.class);
         newSetBinder(binder, Procedure.class);
-        newSetBinder(binder, SessionPropertiesProvider.class);
+        newSetBinder(binder, SessionPropertiesProvider.class).addBinding().to(BaseJdbcSessionProperties.class).in(Scopes.SINGLETON);
         binder.bind(JdbcMetadataFactory.class).in(Scopes.SINGLETON);
         binder.bind(JdbcSplitManager.class).in(Scopes.SINGLETON);
         binder.bind(JdbcRecordSetProvider.class).in(Scopes.SINGLETON);
