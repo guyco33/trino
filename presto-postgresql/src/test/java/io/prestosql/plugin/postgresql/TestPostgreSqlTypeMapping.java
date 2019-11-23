@@ -35,6 +35,7 @@ import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -77,6 +78,7 @@ import static io.prestosql.tests.datatype.DataType.varcharDataType;
 import static io.prestosql.type.JsonType.JSON;
 import static io.prestosql.type.UuidType.UUID;
 import static java.lang.String.format;
+import static java.math.RoundingMode.HALF_UP;
 import static java.nio.charset.StandardCharsets.UTF_16LE;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.time.ZoneOffset.UTC;
@@ -330,6 +332,75 @@ public class TestPostgreSqlTypeMapping
     public void testDecimalExceedingPrecisionMax()
     {
         testUnsupportedDataType("decimal(50,0)");
+
+        JdbcSqlExecutor jdbcSqlExecutor = new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl());
+        jdbcSqlExecutor.execute("CREATE TABLE tpch.test_exceeding_decimal(d_col decimal(50,3))");
+        jdbcSqlExecutor.execute("INSERT INTO tpch.test_exceeding_decimal(d_col) VALUES (1234567890123456789012345678901234567890.123)");
+        try {
+            assertQueryFails(
+                    sessionWithRoundingMode(HALF_UP, 0),
+                    "SELECT d_col FROM tpch.test_exceeding_decimal",
+                    "Decimal overflow");
+        }
+        finally {
+            jdbcSqlExecutor.execute("DROP TABLE tpch.test_exceeding_decimal");
+        }
+    }
+
+    @Test
+    public void testDecimalUnspecifiedPrecision()
+    {
+        JdbcSqlExecutor jdbcSqlExecutor = new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl());
+        jdbcSqlExecutor.execute("CREATE TABLE tpch.test_var_decimal(d_col decimal)");
+        jdbcSqlExecutor.execute("INSERT INTO tpch.test_var_decimal(d_col) VALUES (1.12),(123456.789),(-1.12),(-123456.789)");
+        try {
+            for (Integer scale : asList(0, 1, 2)) {
+                assertQuery(
+                        sessionWithRoundingMode(HALF_UP, scale),
+                        "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_name = 'test_var_decimal'",
+                        format("VALUES ('d_col','decimal(38,%d)')", scale));
+                switch (scale) {
+                    case 0:
+                        assertQuery(
+                                sessionWithRoundingMode(HALF_UP, scale),
+                                "SELECT d_col FROM tpch.test_var_decimal",
+                                "VALUES (1),(123457),(-1),(-123457)");
+                    case 1:
+                        assertQuery(
+                                sessionWithRoundingMode(HALF_UP, scale),
+                                "SELECT d_col FROM tpch.test_var_decimal",
+                                "VALUES (1.1),(123456.8),(-1.1),(-123456.8)");
+                    case 2:
+                        assertQuery(
+                                sessionWithRoundingMode(HALF_UP, scale),
+                                "SELECT d_col FROM tpch.test_var_decimal",
+                                "VALUES (1.12),(123456.79),(-1.12),(-123456.79)");
+                }
+            }
+            for (Integer scale : asList(3, 16, 32)) {
+                assertQuery(
+                        sessionWithRoundingMode(HALF_UP, scale),
+                        "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_name = 'test_var_decimal'",
+                        format("VALUES ('d_col','decimal(38,%d)')", scale));
+                assertQuery(
+                        sessionWithRoundingMode(HALF_UP, scale),
+                        "SELECT d_col FROM tpch.test_var_decimal",
+                        "VALUES (1.12),(123456.789),(-1.12),(-123456.789)");
+            }
+            for (Integer scale : asList(33, 38)) {
+                assertQuery(
+                        sessionWithRoundingMode(HALF_UP, scale),
+                        "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_name = 'test_var_decimal'",
+                        format("VALUES ('d_col','decimal(38,%d)')", scale));
+                assertQueryFails(
+                        sessionWithRoundingMode(HALF_UP, scale),
+                        "SELECT d_col FROM tpch.test_var_decimal",
+                        "Decimal overflow");
+            }
+        }
+        finally {
+            jdbcSqlExecutor.execute("DROP TABLE tpch.test_var_decimal");
+        }
     }
 
     @Test
@@ -962,6 +1033,14 @@ public class TestPostgreSqlTypeMapping
     {
         return Session.builder(getQueryRunner().getDefaultSession())
                 .setSystemProperty("postgresql.array_mapping", AS_ARRAY.name())
+                .build();
+    }
+
+    private Session sessionWithRoundingMode(RoundingMode roundingMode, int scale)
+    {
+        return Session.builder(getQueryRunner().getDefaultSession())
+                .setSystemProperty("postgresql.decimal_rounding_mode", roundingMode.name())
+                .setSystemProperty("postgresql.decimal_default_scale", Integer.valueOf(scale).toString())
                 .build();
     }
 
