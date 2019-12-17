@@ -17,6 +17,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.testing.mysql.TestingMySqlServer;
 import io.prestosql.Session;
+import io.prestosql.plugin.jdbc.UnsupportedTypeHandling;
+import io.prestosql.spi.type.Decimals;
 import io.prestosql.spi.type.TimeZoneKey;
 import io.prestosql.spi.type.VarcharType;
 import io.prestosql.testing.AbstractTestQueryFramework;
@@ -27,17 +29,31 @@ import io.prestosql.testing.datatype.DataType;
 import io.prestosql.testing.datatype.DataTypeTest;
 import io.prestosql.testing.sql.JdbcSqlExecutor;
 import io.prestosql.testing.sql.PrestoSqlExecutor;
+import io.prestosql.testing.sql.TestTable;
+import org.apache.commons.lang3.StringUtils;
 import org.testng.annotations.AfterClass;
+import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.function.Function;
 
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Strings.repeat;
 import static com.google.common.base.Verify.verify;
+import static io.prestosql.plugin.jdbc.BaseJdbcPropertiesProvider.UNSUPPORTED_TYPE_HANDLING;
+import static io.prestosql.plugin.jdbc.DecimalConfig.DecimalMapping.ALLOW_OVERFLOW;
+import static io.prestosql.plugin.jdbc.DecimalConfig.DecimalMapping.STRICT;
+import static io.prestosql.plugin.jdbc.DecimalPropertiesProvider.DECIMAL_DEFAULT_SCALE;
+import static io.prestosql.plugin.jdbc.DecimalPropertiesProvider.DECIMAL_MAPPING;
+import static io.prestosql.plugin.jdbc.DecimalPropertiesProvider.DECIMAL_ROUNDING_MODE;
+import static io.prestosql.plugin.jdbc.UnsupportedTypeHandling.CONVERT_TO_VARCHAR;
+import static io.prestosql.plugin.jdbc.UnsupportedTypeHandling.IGNORE;
+import static io.prestosql.plugin.mysql.MySqlClient.calcDecimalScaleMapping;
 import static io.prestosql.plugin.mysql.MySqlQueryRunner.createMySqlQueryRunner;
 import static io.prestosql.spi.type.TimeZoneKey.UTC_KEY;
 import static io.prestosql.spi.type.VarcharType.createUnboundedVarcharType;
@@ -57,7 +73,11 @@ import static io.prestosql.testing.datatype.DataType.tinyintDataType;
 import static io.prestosql.testing.datatype.DataType.varcharDataType;
 import static io.prestosql.type.JsonType.JSON;
 import static java.lang.String.format;
+import static java.math.RoundingMode.HALF_UP;
+import static java.math.RoundingMode.UNNECESSARY;
+import static java.util.Arrays.asList;
 import static java.util.function.Function.identity;
+import static java.util.stream.Collectors.joining;
 
 @Test
 public class TestMySqlTypeMapping
@@ -217,6 +237,101 @@ public class TestMySqlTypeMapping
     public void testDecimalExceedingPrecisionMax()
     {
         testUnsupportedDataType("decimal(50,0)");
+    }
+
+    @DataProvider
+    public Object[][] testDecimalExceedingPrecisionMaxProvider()
+    {
+        return new Object[][] {
+                {60, 20},
+                {65, 25},
+        };
+    }
+
+    @Test(dataProvider = "testDecimalExceedingPrecisionMaxProvider")
+    public void testDecimalExceedingPrecisionMaxWithDecimalMapping(Integer typePrecision, Integer typeScale)
+    {
+        JdbcSqlExecutor jdbcSqlExecutor = new JdbcSqlExecutor(mysqlServer.getJdbcUrl());
+
+        List<String> testData = asList(
+                "'exact', 1.12345678",
+                "'exact',-1.12345678",
+                "'round', 12345678901234567890.12345678901234567890",
+                "'round',-12345678901234567890.12345678901234567890",
+                "'unsupported', 1234567890123456789012345678901234567890.1234567890",
+                "'unsupported',-1234567890123456789012345678901234567890.1234567890");
+
+        try (TestTable testTable = new TestTable(
+                jdbcSqlExecutor,
+                "tpch.test_exceeding_max_decimal",
+                format("(label varchar(12), d_col decimal(%d,%d))", typePrecision, typeScale),
+                testData)) {
+            String selectSchema = format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_name = '%s'", testTable.getName().split("[.]")[1]);
+            String selectSupportedRows = format("SELECT d_col FROM %s WHERE label <> 'unsupported'", testTable.getName());
+            Function<String, String> selectRows = (label) -> format("SELECT d_col FROM %s WHERE label like '%s'", testTable.getName(), label);
+            Function<Integer, String> expectedSchema = (scale) -> format("VALUES ('label','varchar(12)'), ('d_col', 'decimal(%d,%d)')", Decimals.MAX_PRECISION, scale);
+            Function<String, String> expectedValues = (label) -> "VALUES " + testData.stream()
+                    .filter(s -> s.startsWith(format("'%s',", label)))
+                    .map(s -> s.split(",")[1])
+                    .collect(joining(","));
+            Function<List<Object>, String> expectedRoundedValues = (rounding) -> "VALUES " + testData.stream()
+                    .filter(s -> !s.startsWith("'unsupported',"))
+                    .map(s -> new BigDecimal(s.split(",")[1].trim()).setScale((Integer) rounding.get(0), (RoundingMode) rounding.get(1)).toString())
+                    .collect(joining(","));
+
+            int mappingScale;
+            for (int scale : asList(0, 7)) {
+                mappingScale = calcDecimalScaleMapping(typePrecision, typeScale, scale);
+                assertQuery(sessionWithDecimalMappingAllowOverflow(UNNECESSARY, scale), selectSchema, expectedSchema.apply(mappingScale));
+                assertQueryFails(sessionWithDecimalMappingAllowOverflow(UNNECESSARY, scale), selectRows.apply("%"), "Rounding necessary");
+                assertQuery(sessionWithDecimalMappingAllowOverflow(HALF_UP, scale), selectSchema, expectedSchema.apply(mappingScale));
+                assertQuery(sessionWithDecimalMappingAllowOverflow(HALF_UP, scale), selectSupportedRows, expectedRoundedValues.apply(asList(mappingScale, HALF_UP)));
+                assertQueryFails(sessionWithDecimalMappingAllowOverflow(HALF_UP, scale), selectRows.apply("%"), "Decimal overflow");
+            }
+            for (int scale : asList(8, 16, 18)) {
+                mappingScale = calcDecimalScaleMapping(typePrecision, typeScale, scale);
+                assertQuery(sessionWithDecimalMappingAllowOverflow(UNNECESSARY, scale), selectSchema, expectedSchema.apply(mappingScale));
+                assertQuery(sessionWithDecimalMappingAllowOverflow(UNNECESSARY, scale), selectRows.apply("exact"), expectedValues.apply("exact"));
+                assertQueryFails(sessionWithDecimalMappingAllowOverflow(UNNECESSARY, scale), selectRows.apply("%"), "Rounding necessary");
+                assertQuery(sessionWithDecimalMappingAllowOverflow(HALF_UP, scale), selectSchema, expectedSchema.apply(mappingScale));
+                assertQuery(sessionWithDecimalMappingAllowOverflow(HALF_UP, scale), selectSupportedRows, expectedRoundedValues.apply(asList(mappingScale, HALF_UP)));
+                assertQueryFails(sessionWithDecimalMappingAllowOverflow(HALF_UP, scale), selectRows.apply("%"), "Decimal overflow");
+            }
+            for (int scale : asList(19, 30, 38)) {
+                mappingScale = calcDecimalScaleMapping(typePrecision, typeScale, scale);
+                assertQuery(sessionWithDecimalMappingAllowOverflow(UNNECESSARY, scale), selectSchema, expectedSchema.apply(mappingScale));
+                assertQuery(sessionWithDecimalMappingAllowOverflow(UNNECESSARY, scale), selectRows.apply("exact"), expectedValues.apply("exact"));
+                assertQueryFails(sessionWithDecimalMappingAllowOverflow(UNNECESSARY, scale), selectSupportedRows, "Decimal overflow");
+                assertQuery(sessionWithDecimalMappingAllowOverflow(HALF_UP, scale), selectSchema, expectedSchema.apply(mappingScale));
+                assertQueryFails(sessionWithDecimalMappingAllowOverflow(HALF_UP, scale), selectSupportedRows, "Decimal overflow");
+            }
+
+            assertQuery(sessionWithDecimalMappingStrict(CONVERT_TO_VARCHAR), selectSchema, "VALUES ('label','varchar(12)'), ('d_col', 'varchar')");
+            assertQuery(sessionWithDecimalMappingStrict(CONVERT_TO_VARCHAR), selectRows.apply("%"),
+                    "VALUES " + testData.stream()
+                            .map(s -> s.split(",")[1].trim())
+                            .map(s -> format("('%s')", StringUtils.rightPad(s, s.split("[.]")[0].length() + typeScale + 1, "0")))
+                            .collect(joining(",")));
+
+            assertQuery(sessionWithDecimalMappingStrict(IGNORE), selectSchema, "VALUES ('label','varchar(12)')");
+        }
+    }
+
+    private Session sessionWithDecimalMappingAllowOverflow(RoundingMode roundingMode, int scale)
+    {
+        return Session.builder(getQueryRunner().getDefaultSession())
+                .setCatalogSessionProperty("mysql", DECIMAL_MAPPING, ALLOW_OVERFLOW.name())
+                .setCatalogSessionProperty("mysql", DECIMAL_ROUNDING_MODE, roundingMode.name())
+                .setCatalogSessionProperty("mysql", DECIMAL_DEFAULT_SCALE, Integer.valueOf(scale).toString())
+                .build();
+    }
+
+    private Session sessionWithDecimalMappingStrict(UnsupportedTypeHandling unsupportedTypeHandling)
+    {
+        return Session.builder(getQueryRunner().getDefaultSession())
+                .setCatalogSessionProperty("mysql", DECIMAL_MAPPING, STRICT.name())
+                .setCatalogSessionProperty("mysql", UNSUPPORTED_TYPE_HANDLING, unsupportedTypeHandling.name())
+                .build();
     }
 
     @Test
