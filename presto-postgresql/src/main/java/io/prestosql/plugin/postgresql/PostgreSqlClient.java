@@ -254,6 +254,14 @@ public class PostgreSqlClient
                     if (columnMapping.isPresent()) {
                         boolean nullable = (resultSet.getInt("NULLABLE") != columnNoNulls);
                         Optional<String> comment = Optional.ofNullable(resultSet.getString("REMARKS"));
+                        if (!comment.isPresent() && typeHandle.getJdbcType() == Types.NUMERIC && getDecimalRounding(session) == ALLOW_OVERFLOW) {
+                            if (isUnspecifiedDecimal(typeHandle)) {
+                                comment = Optional.of("source type is decimal");
+                            }
+                            else if (typeHandle.getColumnSize() > Decimals.MAX_PRECISION) {
+                                comment = Optional.of(format("source type is decimal(%s,%s)", typeHandle.getColumnSize(), typeHandle.getDecimalDigits()));
+                            }
+                        }
                         columns.add(JdbcColumnHandle.builder()
                                 .setColumnName(columnName)
                                 .setJdbcTypeHandle(typeHandle)
@@ -335,9 +343,7 @@ public class PostgreSqlClient
                     timestampWriteFunction(session)));
         }
         if (typeHandle.getJdbcType() == Types.NUMERIC && getDecimalRounding(session) == ALLOW_OVERFLOW) {
-            if (typeHandle.getColumnSize() == 131089) {
-                // decimal type with unspecified scale - up to 131072 digits before the decimal point; up to 16383 digits after the decimal point)
-                // 131089 = SELECT LENGTH(pow(10::numeric,131071)::varchar); 131071 = 2^17-1  (org.postgresql.jdbc.TypeInfoCache#getDisplaySize)
+            if (isUnspecifiedDecimal(typeHandle)) {
                 return Optional.of(decimalColumnMapping(createDecimalType(Decimals.MAX_PRECISION, getDecimalDefaultScale(session)), getDecimalRoundingMode(session)));
             }
             int precision = typeHandle.getColumnSize();
@@ -387,6 +393,13 @@ public class PostgreSqlClient
         }
         // TODO support PostgreSQL's TIME WITH TIME ZONE explicitly, otherwise predicate pushdown for these types may be incorrect
         return super.toPrestoType(session, connection, typeHandle);
+    }
+
+    public static boolean isUnspecifiedDecimal(JdbcTypeHandle typeHandle)
+    {
+        // decimal type with unspecified scale - up to 131072 digits before the decimal point; up to 16383 digits after the decimal point)
+        // 131089 = SELECT LENGTH(pow(10::numeric,131071)::varchar); 131071 = 2^17-1  (org.postgresql.jdbc.TypeInfoCache#getDisplaySize)
+        return typeHandle.getColumnSize() == 131089;
     }
 
     public static int calcDecimalScaleMapping(int precision, int scale, int defaultScale)
