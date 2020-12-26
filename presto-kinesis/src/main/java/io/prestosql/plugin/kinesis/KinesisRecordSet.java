@@ -34,6 +34,8 @@ import io.prestosql.spi.connector.RecordCursor;
 import io.prestosql.spi.connector.RecordSet;
 import io.prestosql.spi.type.Type;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Date;
 import java.util.HashMap;
@@ -41,6 +43,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.zip.GZIPInputStream;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static io.airlift.units.Duration.nanosSince;
@@ -169,6 +172,15 @@ public class KinesisRecordSet
     public RecordCursor cursor()
     {
         return new KinesisRecordCursor();
+    }
+
+    public static boolean isGZipped(byte[] data)
+    {
+        if (data == null || data.length < 2) {
+            return false;
+        }
+        int magic = data[0] & 0xff | ((data[1] << 8) & 0xff00);
+        return magic == GZIPInputStream.GZIP_MAGIC;
     }
 
     public class KinesisRecordCursor
@@ -307,7 +319,22 @@ public class KinesisRecordSet
 
             log.debug("Fetching %d bytes from current record. %d messages read so far", messageData.length, totalMessages);
 
-            Optional<Map<DecoderColumnHandle, FieldValueProvider>> decodedValue = messageDecoder.decodeRow(messageData);
+            Optional<Map<DecoderColumnHandle, FieldValueProvider>> decodedValue;
+            if (isGZipped(messageData)) {
+                try {
+                    ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(messageData);
+                    GZIPInputStream gZIPInputStream = new GZIPInputStream(byteArrayInputStream);
+                    decodedValue = messageDecoder.decodeRow(gZIPInputStream.readAllBytes());
+                    gZIPInputStream.close();
+                    byteArrayInputStream.close();
+                }
+                catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            else {
+                decodedValue = messageDecoder.decodeRow(messageData);
+            }
 
             Map<ColumnHandle, FieldValueProvider> currentRowValuesMap = new HashMap<>();
             for (DecoderColumnHandle columnHandle : columnHandles) {

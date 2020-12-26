@@ -31,11 +31,14 @@ import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.zip.GZIPOutputStream;
 
 import static io.prestosql.testing.TestingSession.testSessionBuilder;
 import static io.prestosql.transaction.TransactionBuilder.transaction;
@@ -97,7 +100,21 @@ public class TestRecordAccess
         mockClient.putRecords(putRecordsRequest);
     }
 
-    private void createJsonMessages(String streamName, int count, int idStart)
+    private byte[] compressMessage(byte[] data)
+    {
+        try {
+            ByteArrayOutputStream byteOS = new ByteArrayOutputStream();
+            GZIPOutputStream gzipOS = new GZIPOutputStream(byteOS);
+            gzipOS.write(data);
+            gzipOS.close();
+            return byteOS.toByteArray();
+        }
+        catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void createJsonMessages(String streamName, int count, int idStart, boolean compress)
     {
         String jsonFormat = "{\"id\" : %d, \"name\" : \"%s\"}";
         PutRecordsRequest putRecordsRequest = new PutRecordsRequest();
@@ -110,7 +127,12 @@ public class TestRecordAccess
             String jsonVal = format(jsonFormat, id, name);
 
             // ? with StandardCharsets.UTF_8
-            putRecordsRequestEntry.setData(ByteBuffer.wrap(jsonVal.getBytes(UTF_8)));
+            if (compress) {
+                putRecordsRequestEntry.setData(ByteBuffer.wrap(compressMessage(jsonVal.getBytes(UTF_8))));
+            }
+            else {
+                putRecordsRequestEntry.setData(ByteBuffer.wrap(jsonVal.getBytes(UTF_8)));
+            }
             putRecordsRequestEntry.setPartitionKey(Long.toString(id));
             putRecordsRequestEntryList.add(putRecordsRequestEntry);
         }
@@ -160,7 +182,8 @@ public class TestRecordAccess
     public void testJsonStream()
     {
         // Simple case: add a few specific items, query object and internal fields:
-        createJsonMessages(jsonStreamName, 4, 100);
+        createJsonMessages(jsonStreamName, 2, 100, false);
+        createJsonMessages(jsonStreamName, 2, 102, true);
 
         MaterializedResult result = queryRunner.execute("Select id, name, _shard_id, _message_length, _message from " + jsonStreamName + " where _message_length >= 1");
         assertEquals(result.getRowCount(), 4);
@@ -175,6 +198,7 @@ public class TestRecordAccess
         assertEquals(rows.size(), 4);
         for (MaterializedRow row : rows) {
             assertEquals(row.getFieldCount(), 5);
+            assertTrue((long) row.getFields().get(0) >= 100);
             log.info("ROW: " + row.toString());
         }
     }
