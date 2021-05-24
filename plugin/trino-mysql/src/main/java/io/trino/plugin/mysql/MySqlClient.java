@@ -13,8 +13,10 @@
  */
 package io.trino.plugin.mysql;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.mysql.jdbc.Statement;
+import io.airlift.log.Logger;
 import io.trino.plugin.jdbc.BaseJdbcClient;
 import io.trino.plugin.jdbc.BaseJdbcConfig;
 import io.trino.plugin.jdbc.ColumnMapping;
@@ -26,6 +28,7 @@ import io.trino.plugin.jdbc.JdbcSortItem;
 import io.trino.plugin.jdbc.JdbcTableHandle;
 import io.trino.plugin.jdbc.JdbcTypeHandle;
 import io.trino.plugin.jdbc.PreparedQuery;
+import io.trino.plugin.jdbc.UnsupportedTypeHandling;
 import io.trino.plugin.jdbc.WriteMapping;
 import io.trino.plugin.jdbc.expression.AggregateFunctionRewriter;
 import io.trino.plugin.jdbc.expression.AggregateFunctionRule;
@@ -49,10 +52,12 @@ import io.trino.spi.connector.JoinCondition;
 import io.trino.spi.connector.JoinStatistics;
 import io.trino.spi.connector.JoinType;
 import io.trino.spi.connector.SchemaTableName;
+import io.trino.spi.connector.TableNotFoundException;
 import io.trino.spi.type.CharType;
 import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Decimals;
 import io.trino.spi.type.StandardTypes;
+import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.TypeManager;
 import io.trino.spi.type.TypeSignature;
@@ -66,13 +71,17 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.stream.Stream;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Strings.emptyToNull;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
 import static com.mysql.jdbc.SQLError.SQL_STATE_ER_TABLE_EXISTS_ERROR;
@@ -104,12 +113,15 @@ import static io.trino.plugin.jdbc.StandardColumnMappings.realWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.shortDecimalWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.smallintColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.smallintWriteFunction;
+import static io.trino.plugin.jdbc.StandardColumnMappings.timestampColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.timestampWriteFunctionUsingSqlTimestamp;
 import static io.trino.plugin.jdbc.StandardColumnMappings.tinyintColumnMapping;
 import static io.trino.plugin.jdbc.StandardColumnMappings.tinyintWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.varbinaryReadFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.varbinaryWriteFunction;
 import static io.trino.plugin.jdbc.StandardColumnMappings.varcharWriteFunction;
+import static io.trino.plugin.jdbc.TypeHandlingJdbcSessionProperties.getUnsupportedTypeHandling;
+import static io.trino.plugin.jdbc.UnsupportedTypeHandling.IGNORE;
 import static io.trino.spi.StandardErrorCode.ALREADY_EXISTS;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.type.BigintType.BIGINT;
@@ -121,17 +133,21 @@ import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.SmallintType.SMALLINT;
 import static io.trino.spi.type.TimeWithTimeZoneType.TIME_WITH_TIME_ZONE;
 import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
+import static io.trino.spi.type.TimestampType.createTimestampType;
 import static io.trino.spi.type.TimestampWithTimeZoneType.TIMESTAMP_TZ_MILLIS;
 import static io.trino.spi.type.TinyintType.TINYINT;
 import static io.trino.spi.type.VarbinaryType.VARBINARY;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.String.format;
+import static java.sql.DatabaseMetaData.columnNoNulls;
 import static java.util.stream.Collectors.joining;
 
 public class MySqlClient
         extends BaseJdbcClient
 {
+    private static final Logger log = Logger.get(MySqlClient.class);
+
     private final Type jsonType;
     private final AggregateFunctionRewriter aggregateFunctionRewriter;
 
@@ -219,6 +235,99 @@ public class MySqlClient
             statement.unwrap(Statement.class).enableStreamingResults();
         }
         return statement;
+    }
+
+    @Override
+    public List<JdbcColumnHandle> getColumns(ConnectorSession session, JdbcTableHandle tableHandle)
+    {
+        if (tableHandle.getColumns().isPresent()) {
+            return tableHandle.getColumns().get();
+        }
+        checkArgument(tableHandle.isNamedRelation(), "Cannot get columns for %s", tableHandle);
+        SchemaTableName schemaTableName = tableHandle.getRequiredNamedRelation().getSchemaTableName();
+
+        try (Connection connection = connectionFactory.openConnection(session)) {
+            Map<String, Integer> timestampPrecisions = getTimestampPrecisions(connection, tableHandle);
+            try (ResultSet resultSet = getColumns(tableHandle, connection.getMetaData())) {
+                int allColumns = 0;
+                List<JdbcColumnHandle> columns = new ArrayList<>();
+                while (resultSet.next()) {
+                    allColumns++;
+                    String columnName = resultSet.getString("COLUMN_NAME");
+                    Optional<String> typeName = Optional.ofNullable(resultSet.getString("TYPE_NAME"));
+                    Optional<Integer> decimalDigits;
+                    if (typeName.isPresent() && (typeName.get().equals("TIMESTAMP") || typeName.get().equals("DATETIME"))) {
+                        decimalDigits = Optional.of(timestampPrecisions.get(columnName));
+                    }
+                    else {
+                        decimalDigits = getInteger(resultSet, "DECIMAL_DIGITS");
+                    }
+                    JdbcTypeHandle typeHandle = new JdbcTypeHandle(
+                            getInteger(resultSet, "DATA_TYPE").orElseThrow(() -> new IllegalStateException("DATA_TYPE is null")),
+                            typeName,
+                            getInteger(resultSet, "COLUMN_SIZE"),
+                            decimalDigits,
+                            Optional.empty(),
+                            Optional.empty());
+                    Optional<ColumnMapping> columnMapping = toColumnMapping(session, connection, typeHandle);
+                    log.debug("Mapping data type of '%s' column '%s': %s mapped to %s", schemaTableName, columnName, typeHandle, columnMapping);
+                    // skip unsupported column types
+                    boolean nullable = (resultSet.getInt("NULLABLE") != columnNoNulls);
+                    // Note: some databases (e.g. SQL Server) do not return column remarks/comment here.
+                    Optional<String> comment = Optional.ofNullable(emptyToNull(resultSet.getString("REMARKS")));
+                    if (columnMapping.isPresent()) {
+                        columns.add(JdbcColumnHandle.builder()
+                                .setColumnName(columnName)
+                                .setJdbcTypeHandle(typeHandle)
+                                .setColumnType(columnMapping.get().getType())
+                                .setNullable(nullable)
+                                .setComment(comment)
+                                .build());
+                    }
+                    if (columnMapping.isEmpty()) {
+                        UnsupportedTypeHandling unsupportedTypeHandling = getUnsupportedTypeHandling(session);
+                        verify(
+                                unsupportedTypeHandling == IGNORE,
+                                "Unsupported type handling is set to %s, but toTrinoType() returned empty for %s",
+                                unsupportedTypeHandling,
+                                typeHandle);
+                    }
+                }
+                if (columns.isEmpty()) {
+                    // A table may have no supported columns. In rare cases (e.g. PostgreSQL) a table might have no columns at all.
+                    throw new TableNotFoundException(
+                            schemaTableName,
+                            format("Table '%s' has no supported columns (all %s columns are not supported)", schemaTableName, allColumns));
+                }
+                return ImmutableList.copyOf(columns);
+            }
+        }
+        catch (SQLException e) {
+            throw new TrinoException(JDBC_ERROR, e);
+        }
+    }
+
+    private static Map<String, Integer> getTimestampPrecisions(Connection connection, JdbcTableHandle tableHandle)
+            throws SQLException
+    {
+        String sql = "" +
+                "SELECT column_name, datetime_precision " +
+                "FROM information_schema.columns " +
+                "WHERE table_schema = ? " +
+                "AND table_name = ? " +
+                "AND data_type in ('timestamp','datetime') ";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tableHandle.getRequiredNamedRelation().getSchemaTableName().getSchemaName());
+            statement.setString(2, tableHandle.getRequiredNamedRelation().getRemoteTableName().getTableName());
+
+            Map<String, Integer> timestampPrecisions = new HashMap<>();
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    timestampPrecisions.put(resultSet.getString("column_name"), resultSet.getInt("datetime_precision"));
+                }
+            }
+            return timestampPrecisions;
+        }
     }
 
     @Override
@@ -313,8 +422,8 @@ public class MySqlClient
                 return Optional.of(dateColumnMapping());
 
             case Types.TIMESTAMP:
-                // TODO support higher precisions (https://github.com/trinodb/trino/issues/6910)
-                break; // currently handled by the default mappings
+                TimestampType timestampType = createTimestampType(typeHandle.getRequiredDecimalDigits());
+                return Optional.of(timestampColumnMapping(timestampType));
         }
 
         // TODO add explicit mappings
