@@ -214,6 +214,7 @@ import static io.trino.plugin.hive.HiveTableProperties.getOrcBloomFilterFpp;
 import static io.trino.plugin.hive.HiveTableProperties.getPartitionedBy;
 import static io.trino.plugin.hive.HiveTableProperties.getSingleCharacterProperty;
 import static io.trino.plugin.hive.HiveTableProperties.isTransactional;
+import static io.trino.plugin.hive.HiveTimestampPrecision.MILLISECONDS;
 import static io.trino.plugin.hive.HiveType.HIVE_STRING;
 import static io.trino.plugin.hive.HiveType.toHiveType;
 import static io.trino.plugin.hive.HiveWriterFactory.computeBucketedFileName;
@@ -2907,7 +2908,8 @@ public class HiveMetadata
     private static void validateTimestampTypes(Type type, HiveTimestampPrecision precision)
     {
         if (type instanceof TimestampType) {
-            if (((TimestampType) type).getPrecision() != precision.getPrecision()) {
+            int typePrecision = ((TimestampType) type).getPrecision();
+            if (typePrecision >= MILLISECONDS.getPrecision() && typePrecision != precision.getPrecision()) {
                 throw new TrinoException(NOT_SUPPORTED, format("Incorrect timestamp precision for %s; the configured precision is %s", type, precision));
             }
         }
