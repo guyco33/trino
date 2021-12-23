@@ -50,7 +50,7 @@ public class TestingPostgreSqlServer
     public TestingPostgreSqlServer()
     {
         // Use the oldest supported PostgreSQL version
-        dockerContainer = new PostgreSQLContainer<>("postgres:9.6")
+        dockerContainer = new PostgreSQLContainer<>("postgres:12")
                 .withDatabaseName(DATABASE)
                 .withUsername(USER)
                 .withPassword(PASSWORD)

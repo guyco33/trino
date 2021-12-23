@@ -176,6 +176,16 @@ public class TestPostgreSqlTypeMapping
     }
 
     @Test
+    public void testAccessOfDeclarativePartitionTables()
+            throws Exception
+    {
+        JdbcSqlExecutor executor = new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl(), postgreSqlServer.getProperties());
+
+        executor.execute("CREATE TABLE test_part_tbl (id int not null, payload varchar, logdate  date not null) PARTITION BY RANGE (logdate)");
+        assertThat(computeActual("SHOW TABLES").getOnlyColumnAsSet()).contains("test_part_tbl");
+    }
+
+    @Test
     public void testBasicTypes()
     {
         SqlDataTypeTest.create()
