@@ -107,6 +107,7 @@
         <module>plugin/trino-redis</module>
         <module>plugin/trino-redshift</module>
         <module>plugin/trino-resource-group-managers</module>
+        <module>plugin/trino-sap-hana</module>
         <module>plugin/trino-session-property-managers</module>
         <module>plugin/trino-singlestore</module>
         <module>plugin/trino-snowflake</module>
@@ -1393,6 +1394,19 @@
             <dependency>
                 <groupId>io.trino</groupId>
                 <artifactId>trino-resource-group-managers</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+            </dependency>
+
+            <dependency>
+                <groupId>io.trino</groupId>
+                <artifactId>trino-sap-hana</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>io.trino</groupId>
+                <artifactId>trino-sap-hana</artifactId>
                 <version>${project.version}</version>
                 <type>test-jar</type>
             </dependency>
