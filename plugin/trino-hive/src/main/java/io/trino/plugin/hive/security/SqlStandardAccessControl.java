@@ -325,7 +325,7 @@ public class SqlStandardAccessControl
     @Override
     public void checkCanSetTableAuthorization(ConnectorSecurityContext context, SchemaTableName tableName, TrinoPrincipal principal)
     {
-        if (!isAdmin(context)) {
+        if (!isTableOwner(context, tableName)) {
             denySetTableAuthorization(tableName.toString(), principal);
         }
     }
