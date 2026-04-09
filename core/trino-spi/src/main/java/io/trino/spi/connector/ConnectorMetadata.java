@@ -315,7 +315,8 @@ public interface ConnectorMetadata
                                 return RelationType.VIEW;
                             }
                             return RelationType.TABLE;
-                        }));
+                        },
+                        (first, second) -> first));
     }
 
     /**
