@@ -59,7 +59,6 @@ import io.trino.spi.connector.ConnectorTableMetadata;
 import io.trino.spi.connector.JoinCondition;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.TableNotFoundException;
-import io.trino.spi.security.ConnectorIdentity;
 import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Decimals;
 import io.trino.spi.type.TimestampType;
@@ -190,36 +189,6 @@ public class SapHanaClient
             return Optional.of(ImmutableList.of("TABLE", "VIEW", "SYNONYM"));
         }
         return Optional.of(ImmutableList.of("TABLE", "VIEW"));
-    }
-
-    @Override
-    public List<SchemaTableName> getTableNames(ConnectorSession session, Optional<String> schema)
-    {
-        try (Connection connection = connectionFactory.openConnection(session)) {
-            ConnectorIdentity identity = session.getIdentity();
-            Optional<String> remoteSchema = schema.map(schemaName -> getIdentifierMapping().toRemoteSchemaName(getRemoteIdentifiers(connection), identity, schemaName));
-            if (remoteSchema.isPresent() && !filterRemoteSchema(remoteSchema.get())) {
-                return ImmutableList.of();
-            }
-
-            try (ResultSet resultSet = getTables(connection, remoteSchema, Optional.empty())) {
-                // Use a Set to deduplicate entries, as the SAP HANA JDBC driver may return
-                // the same table name multiple times in a single metadata query result set.
-                ImmutableSet.Builder<SchemaTableName> list = ImmutableSet.builder();
-                while (resultSet.next()) {
-                    String remoteSchemaFromResultSet = getTableRemoteSchemaName(resultSet);
-                    String tableSchema = getIdentifierMapping().fromRemoteSchemaName(remoteSchemaFromResultSet);
-                    String tableName = getIdentifierMapping().fromRemoteTableName(remoteSchemaFromResultSet, resultSet.getString("TABLE_NAME"));
-                    if (filterRemoteSchema(remoteSchemaFromResultSet)) {
-                        list.add(new SchemaTableName(tableSchema, tableName));
-                    }
-                }
-                return list.build().asList();
-            }
-        }
-        catch (SQLException e) {
-            throw new TrinoException(JDBC_ERROR, e);
-        }
     }
 
     @Override

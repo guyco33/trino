@@ -198,6 +198,7 @@ public abstract class BaseJdbcClient
     {
         return getAllTableComments(session, schema).stream()
                 .map(RelationCommentMetadata::name)
+                .distinct()
                 .collect(toImmutableList());
     }
 
