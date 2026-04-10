@@ -57,6 +57,7 @@ import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.ConnectorTableMetadata;
 import io.trino.spi.connector.JoinCondition;
+import io.trino.spi.connector.RelationCommentMetadata;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.TableNotFoundException;
 import io.trino.spi.type.DecimalType;
@@ -195,9 +196,8 @@ public class SapHanaClient
     @Override
     public List<SchemaTableName> getTableNames(ConnectorSession session, Optional<String> schema)
     {
-        // Use distinct to deduplicate entries, as the SAP HANA JDBC driver may return
-        // the same table name multiple times in a single metadata query result set.
-        return super.getTableNames(session, schema).stream()
+        return getAllTableComments(session, schema).stream()
+                .map(RelationCommentMetadata::name)
                 .distinct()
                 .collect(toImmutableList());
     }
