@@ -80,6 +80,7 @@ import java.util.function.BiFunction;
 
 import static com.google.common.base.Strings.emptyToNull;
 import static com.google.common.base.Verify.verify;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.trino.plugin.jdbc.JdbcErrorCode.JDBC_ERROR;
 import static io.trino.plugin.jdbc.PredicatePushdownController.FULL_PUSHDOWN;
 import static io.trino.plugin.jdbc.StandardColumnMappings.bigintColumnMapping;
@@ -189,6 +190,16 @@ public class SapHanaClient
             return Optional.of(ImmutableList.of("TABLE", "VIEW", "SYNONYM"));
         }
         return Optional.of(ImmutableList.of("TABLE", "VIEW"));
+    }
+
+    @Override
+    public List<SchemaTableName> getTableNames(ConnectorSession session, Optional<String> schema)
+    {
+        // Use distinct to deduplicate entries, as the SAP HANA JDBC driver may return
+        // the same table name multiple times in a single metadata query result set.
+        return super.getTableNames(session, schema).stream()
+                .distinct()
+                .collect(toImmutableList());
     }
 
     @Override
